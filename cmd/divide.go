@@ -26,13 +26,16 @@ import (
 )
 
 var (
-	amount     uint
-	delimiter  string
-	header     bool
-	fileFolder string
-	fileName   string
+	amount        uint
+	delimiter     string
+	runeDelimiter rune
+	header        bool
+	fileFolder    string
+	fileName      string
 )
 
+// writeCSV function takes a slice of source file and writes
+// a new one with index supplied
 func writeCSV(index int, lines [][]string, headerLine []string, c chan uint) {
 	newFileName := fmt.Sprintf("%s/%03d.%s", fileFolder, index, fileName)
 	newFile, err := os.Create(newFileName)
@@ -43,28 +46,34 @@ func writeCSV(index int, lines [][]string, headerLine []string, c chan uint) {
 	}
 
 	csvWriter := csv.NewWriter(newFile)
-	if header {
-		csvWriter.Write(headerLine)
+	if len(delimiter) == 1 {
+		csvWriter.Comma = runeDelimiter // setting a new delimiter for Writer
 	}
-	csvWriter.WriteAll(lines)
-	fmt.Printf("File %03d created\n", index)
-	c <- 1
+	if header {
+		csvWriter.Write(headerLine) // writing a field names line if -f key is provided
+	}
+	csvWriter.WriteAll(lines) // writing all provided lines
+
+	c <- 1 // this message means the task is complete
 }
 
 func divide(cmd *cobra.Command, args []string) {
 	var fileLength int
 	var headerLine []string
-	filePath := strings.Replace(args[0], `\`, "/", -1)
+
+	// replacing all Windows separators with universal ones
+	filePath := strings.Replace(args[0], "\\", "/", -1)
 	fileFolder = path.Dir(filePath)
 	fileName = path.Base(filePath)
 	file, _ := os.Open(filePath)
 	csvReader := csv.NewReader(file)
-	if len(delimiter) == 1 {
-		runeDelimiter := rune(delimiter[0])
-		csvReader.Comma = runeDelimiter
-	}
-	records, err := csvReader.ReadAll()
 
+	if len(delimiter) == 1 {
+		runeDelimiter = rune(delimiter[0])
+		csvReader.Comma = runeDelimiter // setting a new delimiter for Reader
+	}
+
+	records, err := csvReader.ReadAll()
 	if err != nil {
 		fmt.Println("Error:", err)
 		os.Exit(1)
@@ -74,11 +83,16 @@ func divide(cmd *cobra.Command, args []string) {
 		headerLine = records[0]
 		records = records[1:]
 	}
+
 	fileLength = len(records)
 	if fileLength < int(amount) {
 		fmt.Printf("File lines amount (%d) is smaller than requested parts (%d)\n", amount, fileLength)
 		os.Exit(0)
 	}
+
+	// based on the total amount of lines in file dividing this
+	// equally between all destination files
+	// remainder of equation is spread between files as well
 	quotient := fileLength / int(amount)
 	remainder := fileLength % int(amount)
 	var linesPerFile = make([]int, amount)
@@ -90,6 +104,9 @@ func divide(cmd *cobra.Command, args []string) {
 			linesPerFile[i] = quotient
 		}
 	}
+
+	// writers are launched as goroutines
+	// each call receives a unique slice of initial records
 	curIndex := 0
 	c := make(chan uint)
 	for i, val := range linesPerFile {
@@ -97,10 +114,12 @@ func divide(cmd *cobra.Command, args []string) {
 		curIndex = curIndex + val
 	}
 
+	// this loop awaits all goroutines to complete successfuly
 	var total uint
 	for total != amount {
 		total += <-c
 	}
+
 	fmt.Println("New files created successfully")
 }
 
@@ -121,10 +140,12 @@ Parts amount shoud be provided with arguments.`,
 			return errors.New("Provided path is invalid")
 		}
 
+		// validate amount of destination files
 		if amount < 2 || amount > 999 {
 			return errors.New("Invalid value for parts amount. Should be between 2 and 999")
 		}
 
+		// validate length of delimiter
 		if len(delimiter) != 1 {
 			return errors.New("Delimiter should only be one character long")
 		}
@@ -137,6 +158,7 @@ Parts amount shoud be provided with arguments.`,
 func init() {
 	rootCmd.AddCommand(divideCmd)
 
+	// defining flags for application
 	divideCmd.Flags().UintVarP(&amount, "amount", "a", 2, "Amount of equal parts to divide a file. Should be between 2 and 999")
 	divideCmd.Flags().BoolVarP(&header, "field-names", "f", false, "Use if file contains a header line with field names")
 	divideCmd.Flags().StringVarP(&delimiter, "delimiter", "d", ",", "Single character to be used as delimiter")
