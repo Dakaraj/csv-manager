@@ -25,33 +25,30 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	amount        uint
-	delimiter     string
-	runeDelimiter rune
-	header        bool
-	fileFolder    string
-	fileName      string
-)
-
-// writeCSV function takes a slice of source file and writes
+// writeCSVGoroutine function takes a slice of source file and writes
 // a new one with index supplied
-func writeCSV(index int, lines [][]string, headerLine []string, c chan uint) {
-	newFileName := fmt.Sprintf("%s/%03d.%s", fileFolder, index, fileName)
-	newFile, err := os.Create(newFileName)
+func writeCSVGoroutine(index int, lines [][]string, headerLine []string, c chan uint) {
+	newFilePath := fmt.Sprintf("%s/%03d.%s", fileFolder, index, fileName)
+	newFile, err := os.Create(newFilePath)
 	defer newFile.Close()
+
 	if err != nil {
 		fmt.Printf("File creation failed with error: %s\n", err.Error())
 		os.Exit(1)
 	}
 
 	csvWriter := csv.NewWriter(newFile)
+
+	// setting a new delimiter for Writer
 	if len(delimiter) == 1 {
-		csvWriter.Comma = runeDelimiter // setting a new delimiter for Writer
+		csvWriter.Comma = runeDelimiter
 	}
+
+	// writing a field names line if -f key is provided
 	if header {
-		csvWriter.Write(headerLine) // writing a field names line if -f key is provided
+		csvWriter.Write(headerLine)
 	}
+
 	csvWriter.WriteAll(lines) // writing all provided lines
 
 	c <- 1 // this message means the task is complete
@@ -66,11 +63,13 @@ func divide(cmd *cobra.Command, args []string) {
 	fileFolder = path.Dir(filePath)
 	fileName = path.Base(filePath)
 	file, _ := os.Open(filePath)
+	defer file.Close()
 	csvReader := csv.NewReader(file)
 
+	// setting a new delimiter for Reader
 	if len(delimiter) == 1 {
 		runeDelimiter = rune(delimiter[0])
-		csvReader.Comma = runeDelimiter // setting a new delimiter for Reader
+		csvReader.Comma = runeDelimiter
 	}
 
 	records, err := csvReader.ReadAll()
@@ -110,7 +109,7 @@ func divide(cmd *cobra.Command, args []string) {
 	curIndex := 0
 	c := make(chan uint)
 	for i, val := range linesPerFile {
-		go writeCSV(i+1, records[curIndex:curIndex+val], headerLine, c)
+		go writeCSVGoroutine(i+1, records[curIndex:curIndex+val], headerLine, c)
 		curIndex = curIndex + val
 	}
 
